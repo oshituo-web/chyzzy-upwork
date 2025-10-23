@@ -1,235 +1,413 @@
-import React, { useState } from 'react';
+ import React, { useState } from 'react';
+import { RefreshCw, Copy, Send, Zap, ListChecks, DollarSign, Loader2, Link, Shield } from 'lucide-react';
 
-const App = () => {
-  const KNOWLEDGE_BASE_PROPOSALS = `
-    Sample 1:
-    Client Summary: The client needs a React developer to build a new e-commerce front-end. They require expertise in Redux for state management and Next.js for server-side rendering.
-    Proposal Draft: "Hi [Client Name], I'm a senior React developer with 5+ years of experience in building high-performance e-commerce sites. My expertise in Redux and Next.js aligns perfectly with your requirements. I'm confident I can deliver a fast, scalable, and user-friendly storefront. Let's chat about your project goals."
+// --- CONFIGURATION & API SETUP ---
+// NOTE: VITE_GEMINI_API_KEY must be set in your Vercel Environment Variables.
+// FIX: Changed API_KEY back to an empty string. In this development environment, 
+// the API key is automatically injected into the fetch call when this variable is empty,
+// resolving the "process is not defined" error.
+const API_KEY = ""; 
+const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent';
 
-    Sample 2:
-    Client Summary: A startup is looking for a Python/Django developer to build the back-end for their new social media app. Key features include user authentication, a news feed, and a messaging system.
-    Proposal Draft: "Hello! As a Python/Django expert with a track record of building robust back-end systems, I was excited to see your project. I've built similar social media features before, including authentication, feeds, and real-time messaging. I'm available to start immediately and can quickly get up to speed on your project."
-
-    Sample 3:
-    Client Summary: The client wants to migrate their existing WordPress site to a headless CMS (Contentful) and a static site generator (Gatsby). They need someone with experience in both technologies.
-    Proposal Draft: "Hi there, I specialize in headless CMS migrations and have extensive experience with Contentful and Gatsby. I can help you move your content seamlessly and build a blazing-fast, modern website. I've helped several clients with similar projects, resulting in improved performance and easier content management. I'd love to learn more about your specific needs."
-  `;
-
-  const PROPOSAL_SCHEMA = {
-    type: "object",
-    properties: {
-      clientSummary: {
-        type: "array",
-        items: {
-          type: "string"
-        },
-        minItems: 2,
-        maxItems: 3,
-        description: "A summary of the client's needs in 2-3 bullet points."
-      },
-      proposalDraft: {
-        type: "string",
-        description: "The main proposal text, written in a professional and engaging tone."
-      },
-      suggestedSkills: {
-        type: "array",
-        items: {
-          type: "string"
-        },
-        minItems: 5,
-        description: "A list of at least 5 relevant skills for the job."
-      }
+// Define the required output structure for the Gemini API call.
+const RESPONSE_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    clientSummary: {
+      type: "ARRAY",
+      description: "2-3 highly concise bullet points summarizing the core client needs and deliverables.",
+      items: { type: "STRING" }
     },
-    required: ["clientSummary", "proposalDraft", "suggestedSkills"]
-  };
+    proposalDraft: {
+      type: "STRING",
+      description: "A professional, persuasive proposal draft (150-250 words) that addresses all client needs and includes a final call to action. Use a friendly, experienced tone."
+    },
+    suggestedSkills: {
+      type: "ARRAY",
+      description: "A list of 5-8 relevant technical keywords/skills extracted from the job description.",
+      items: { type: "STRING" }
+    }
+  },
+  required: ["clientSummary", "proposalDraft", "suggestedSkills"],
+  propertyOrdering: ["clientSummary", "proposalDraft", "suggestedSkills"]
+};
 
-  const SYSTEM_PROMPT = `
-    You are an Expert Upwork Proposal Assistant. Your task is to generate a compelling proposal based on the user's job description.
-    Use the following knowledge base of successful proposals to inform your writing style and structure:
-    ${KNOWLEDGE_BASE_PROPOSALS}
-    The output must be a JSON object that strictly adheres to the following schema:
-    ${JSON.stringify(PROPOSAL_SCHEMA)}
-  `;
-
+/**
+ * Custom hook to handle state for the proposal generator.
+ */
+const useProposalState = () => {
   const [jobDescription, setJobDescription] = useState('');
-  const [userInput, setUserInput] = useState('');
   const [proposalData, setProposalData] = useState(null);
-  const [profileImage, setProfileImage] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [showToast, setShowToast] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [copied, setCopied] = useState(false);
 
-  const generateProfileImage = async (skillsArray) => {
-    const prompt = `Minimalist icon logo for a freelance developer specializing in ${skillsArray.join(', ')}`;
-    console.log("Image prompt:", prompt);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    return "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cGF0aCBkPSJNNTAsMkE0OCw0OCwwLDEsMSwyLDUwLDQ4LDQ4LDAsMCwxLDUwLDJaIiBmaWxsPSIjY2RjZGMiLz48cGF0aCBkPSJNNzMsMjZsLTMzLDMzTDMxLDcwLDMwLDY5bC0xLTFMMjgsNjdsLTgtOGExLjQsMS40LDAsMCwxLDAtMmw4LThhMS40LDEuNCwwLDAsMSwyLDBsOCw4LDIsMi0yLDItOCw4LTMsM0wzMSw2MmwyLTMsNy03LDMzLTMzYTEuNCwxLjQsMCwwLDEsMiwwbDgsOGExLjQsMS40LDAsMCwxLDAsMloiIGZpbGw9IiM0MjQyNDIiLz48L3N2Zz4=";
+  /**
+   * Exponential backoff utility for retrying API calls.
+   * @param {function} fn - The function to execute.
+   * @param {number} maxRetries - Maximum number of retries.
+   */
+  const withExponentialBackoff = async (fn, maxRetries = 3) => {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (e) {
+        if (attempt === maxRetries - 1) throw e;
+        const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
   };
 
-  const handleGenerateProposal = async () => {
-    setLoading(true);
-    setError('');
+  /**
+   * Calls the Gemini API to generate the structured proposal.
+   */
+  const generateProposal = async () => {
+    if (!jobDescription.trim()) {
+      setError("Please paste a job description to generate a proposal.");
+      return;
+    }
+
+    // Check API Key using the corrected variable access method
+    // If API_KEY is empty, the key is handled by the execution environment.
+    // If you are deploying this to Vercel/another host, you must use a proper 
+    // environment variable access method (like import.meta.env.VITE_GEMINI_API_KEY)
+    // and ensure your host config is set up.
+    if (!API_KEY) {
+      // Since we deliberately left it empty for the current environment, we skip the key error check, 
+      // but warn the user about external deployment.
+      console.log("API Key is empty, relying on automatic key injection.");
+    }
+
+    setIsLoading(true);
+    setError(null);
     setProposalData(null);
-    setProfileImage(null);
+    setCopied(false);
+
+    // Prompt the model
+    const systemPrompt = `You are a world-class AI designed to help highly-rated Upwork freelancers. Your task is to analyze the user's job description and return a structured JSON object containing a brief summary of client needs, a professional proposal draft, and a list of key skills. The proposal draft MUST be persuasive, professional, and directly address the key requirements mentioned in the job post. Do not add any introductory or concluding text outside of the JSON object.`;
+    
+    const userQuery = `Analyze the following job description and generate the structured proposal components:\n\n---JOB DESCRIPTION---\n${jobDescription}`;
+
+    const payload = {
+      contents: [{ parts: [{ text: userQuery }] }],
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: RESPONSE_SCHEMA
+      }
+    };
 
     try {
-      if (!jobDescription.trim()) {
-        throw new Error('Job description cannot be empty.');
+      const response = await withExponentialBackoff(async () => {
+        const res = await fetch(`${API_URL}?key=${API_KEY}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+          const errorBody = await res.json();
+          throw new Error(`API Request Failed: ${res.status} - ${errorBody.error?.message || res.statusText}`);
+        }
+        return res;
+      });
+
+      const result = await response.json();
+      const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+      
+      if (!text) {
+        throw new Error("API returned no text content or an empty response.");
       }
 
-      console.log("User input:", userInput);
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      const mockApiResponse = {
-        clientSummary: [
-          "Client needs a frontend developer for an e-commerce site.",
-          "Requires expertise in React and Tailwind CSS.",
-          "The project involves building responsive UI components."
-        ],
-        proposalDraft: `Hi [Client Name],\n\nI am a skilled React developer with extensive experience in building beautiful and responsive e-commerce websites using Tailwind CSS. I have a keen eye for design and a commitment to writing clean, efficient code.\n\nI am confident that I can deliver a high-quality solution that meets your requirements. I am available to discuss the project further at your convenience. (User input: ${userInput})`,
-        suggestedSkills: ["React", "Tailwind CSS", "JavaScript", "HTML5", "CSS3", "E-commerce", "Responsive Design"]
-      };
+      // Check for common error structure returned as JSON text
+      if (text.startsWith('{') && text.includes('"error"')) {
+          const errorObj = JSON.parse(text);
+          throw new Error(`API Error: ${errorObj.error.message}`);
+      }
 
-      setProposalData(mockApiResponse);
 
-      const image = await generateProfileImage(mockApiResponse.suggestedSkills);
-      setProfileImage(image);
+      const parsedJson = JSON.parse(text);
+      setProposalData(parsedJson);
 
-    } catch (err) {
-      setError(err.message);
+    } catch (e) {
+      console.error("API Error:", e);
+      // Removed the direct instruction to check Vercel key here as API_KEY is now empty
+      // for local Canvas execution.
+      setError(`Failed to generate proposal: ${e.message}. The API call failed. Please try again.`);
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
-  const copyToClipboard = () => {
-    if (proposalData && proposalData.proposalDraft) {
-      navigator.clipboard.writeText(proposalData.proposalDraft);
-      setShowToast(true);
-      setTimeout(() => {
-        setShowToast(false);
-      }, 3000);
+  const copyToClipboard = (text) => {
+    if (text) {
+      // Use execCommand for broader compatibility in some browser contexts
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     }
+  };
+
+  return {
+    jobDescription,
+    setJobDescription,
+    proposalData,
+    isLoading,
+    error,
+    copied,
+    generateProposal,
+    copyToClipboard
+  };
+};
+
+// --- REACT COMPONENT ---
+
+const App = () => {
+  const {
+    jobDescription,
+    setJobDescription,
+    proposalData,
+    isLoading,
+    error,
+    copied,
+    generateProposal,
+    copyToClipboard
+  } = useProposalState();
+
+  const handleCopySection = (content, title) => {
+    let textToCopy = '';
+    if (Array.isArray(content)) {
+      textToCopy = content.map(item => `• ${item}`).join('\n');
+    } else if (typeof content === 'string') {
+      textToCopy = content;
+    } else {
+      textToCopy = JSON.stringify(content, null, 2);
+    }
+    
+    copyToClipboard(textToCopy);
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8">
-      <div className="w-full max-w-4xl mx-auto bg-white rounded-2xl shadow-lg p-6 sm:p-8 relative space-y-8">
-        {showToast && (
-          <div className="absolute top-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-md animate-fade-in-out">
-            Copied to clipboard!
-          </div>
-        )}
-        <header className="text-center">
-          <h1 className="text-3xl sm:text-4xl font-bold text-slate-800">
-            Upwork Proposal AI Helper
-          </h1>
-          <p className="text-slate-500 mt-2">Paste a job description to generate a tailored proposal in seconds.</p>
-        </header>
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-sans">
+      <script src="https://cdn.tailwindcss.com"></script>
+      <header className="text-center mb-8">
+        <h1 className="4xl sm:text-5xl font-extrabold text-indigo-700 tracking-tight flex items-center justify-center">
+          <Zap className="w-8 h-8 mr-2 text-yellow-500" />
+          Upwork Proposal AI Helper
+        </h1>
+        <p className="text-gray-600 mt-2 text-lg">
+          Generate structured, high-conversion proposals using the Gemini API.
+        </p>
+      </header>
 
-        <main className="space-y-6">
-          <div className="space-y-2">
-            <label htmlFor="job-description" className="block text-slate-700 font-medium">
-              Paste Job Description Here:
-            </label>
-            <textarea
-              id="job-description"
-              className="w-full h-60 p-3 border border-slate-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow duration-150 resize-y"
-              value={jobDescription}
-              onChange={(e) => setJobDescription(e.target.value)}
-              placeholder="Paste the full job description from Upwork..."
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="user-input" className="block text-slate-700 font-medium">
-              Additional Instructions (Optional):
-            </label>
-            <input
-              id="user-input"
-              type="text"
-              className="w-full p-3 border border-slate-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow duration-150"
-              value={userInput}
-              onChange={(e) => setUserInput(e.target.value)}
-              placeholder="e.g., Emphasize my experience in e-commerce"
-            />
-          </div>
-
-          <div className="text-center pt-2">
-            <button
-              className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg focus:outline-none focus:ring-4 focus:ring-blue-300 disabled:bg-blue-400 disabled:cursor-not-allowed transition-all duration-200 ease-in-out transform hover:scale-105 shadow-md hover:shadow-lg"
-              type="button"
-              onClick={handleGenerateProposal}
-              disabled={loading}
-            >
-              {loading ? 'Generating...' : 'Generate Proposal'}
-            </button>
-          </div>
-        </main>
-
-        {error && (
-          <div className="mt-6 p-4 bg-red-100 text-red-700 border border-red-200 rounded-lg text-center">
-            <p><span className="font-bold">Error:</span> {error}</p>
-          </div>
-        )}
-
-        {loading && (
-            <div className="mt-6 text-center text-slate-600">
-                <p>Analyzing job description and generating your proposal...</p>
-            </div>
-        )}
-
-        {proposalData && !error && (
-          <section className="mt-10 pt-8 border-t border-slate-200 space-y-8">
-            <header>
-                <h2 className="text-2xl sm:text-3xl font-bold text-center text-slate-800">
-                Generated Proposal & Insights
-                </h2>
-            </header>
-            <div className="bg-slate-50/80 rounded-lg p-6 space-y-6">
-              <div className="flex flex-col sm:flex-row items-start gap-6">
-                {profileImage && (
-                  <img src={profileImage} alt="Generated Profile Icon" className="w-24 h-24 sm:w-28 sm:h-28 rounded-full border-4 border-white shadow-md shrink-0" />
-                )}
-                <div className="flex-grow">
-                  <h3 className="font-bold text-lg text-slate-700 mb-2">Client Summary:</h3>
-                  <ul className="list-disc list-inside space-y-1 text-slate-600">
-                    {proposalData.clientSummary.map((item, index) => (
-                      <li key={index}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-              
-              <div className="space-y-2">
-                <h3 className="font-bold text-lg text-slate-700">Proposal Draft:</h3>
-                <p className="text-slate-600 whitespace-pre-wrap leading-relaxed">{proposalData.proposalDraft}</p>
-              </div>
-
-              <div className="space-y-2">
-                <h3 className="font-bold text-lg text-slate-700">Suggested Skills:</h3>
-                <div className="flex flex-wrap gap-2">
-                  {proposalData.suggestedSkills.map((skill, index) => (
-                    <span key={index} className="bg-blue-100 text-blue-800 text-sm font-semibold px-3 py-1 rounded-full">
-                      {skill}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="text-center pt-4">
+      <main className="max-w-6xl mx-auto">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* --- LEFT COLUMN: INPUT & CONTROLS --- */}
+          <div className="lg:col-span-1 space-y-4">
+            <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+              <h2 className="text-2xl font-semibold text-gray-800 mb-4 flex items-center">
+                <Send className="w-5 h-5 mr-2 text-indigo-500" />
+                Paste Job Description
+              </h2>
+              <textarea
+                value={jobDescription}
+                onChange={(e) => setJobDescription(e.target.value)}
+                className="w-full h-80 p-4 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 resize-none text-gray-700 text-sm shadow-inner"
+                placeholder="Paste the full job post text from Upwork here..."
+                disabled={isLoading}
+              />
               <button
-                className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg focus:outline-none focus:ring-4 focus:ring-green-300 transition-all duration-200 ease-in-out transform hover:scale-105 shadow-md hover:shadow-lg"
-                type="button"
-                onClick={copyToClipboard}
+                onClick={generateProposal}
+                disabled={isLoading || jobDescription.trim().length < 50}
+                className={`w-full mt-4 flex items-center justify-center py-3 px-6 rounded-xl font-bold text-lg transition duration-300 transform shadow-md ${
+                  isLoading
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-xl active:scale-98'
+                }`}
               >
-                Copy Proposal Draft
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-5 h-5 mr-2" />
+                    Generate Proposal
+                  </>
+                )}
               </button>
             </div>
-          </section>
+            
+            {error && (
+              <div className="p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg shadow-md">
+                <p className="font-bold">Error:</p>
+                <p className="text-sm">{error}</p>
+                <p className="text-xs mt-2 font-semibold">
+                  Note: If deploying externally, ensure your `VITE_GEMINI_API_KEY` is set correctly.
+                </p>
+              </div>
+            )}
+            
+            {copied && (
+              <div className="p-3 bg-green-100 border border-green-400 text-green-700 rounded-lg shadow-md text-center font-semibold">
+                Content copied to clipboard!
+              </div>
+            )}
+
+            <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+                <h3 className="text-xl font-semibold text-gray-800 mb-3 flex items-center">
+                    <DollarSign className="w-5 h-5 mr-2 text-green-500" />
+                    Pricing & Budget Note
+                </h3>
+                <p className="text-sm text-gray-600">
+                    Always review the client's stated budget. If they provided a range, suggest a middle ground. If they provided a fixed price, tailor your response to confirm your ability to deliver within that scope. The AI draft assumes you will insert specific numbers later.
+                </p>
+            </div>
+          </div>
+
+          {/* --- RIGHT COLUMN: OUTPUT & RESULTS --- */}
+          <div className="lg:col-span-2 space-y-6">
+            <ProposalSection
+              title="Client Needs Summary"
+              icon={ListChecks}
+              color="text-indigo-500"
+              content={proposalData?.clientSummary || []}
+              isLoading={isLoading}
+              onCopy={() => handleCopySection(proposalData?.clientSummary, 'Client Summary')}
+              placeholderText="The AI will summarize the 2-3 most critical deliverables after analysis."
+              type="list"
+            />
+
+            <ProposalSection
+              title="Proposal Draft (Ready to Send)"
+              icon={Send}
+              color="text-blue-500"
+              content={proposalData?.proposalDraft || ''}
+              isLoading={isLoading}
+              onCopy={() => handleCopySection(proposalData?.proposalDraft, 'Proposal Draft')}
+              placeholderText="A professional, 150-250 word draft, tailored to the client's request, will appear here."
+              type="text"
+            />
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <ProposalSection
+                    title="Suggested Skills/Keywords"
+                    icon={Zap}
+                    color="text-yellow-500"
+                    content={proposalData?.suggestedSkills || []}
+                    isLoading={isLoading}
+                    onCopy={() => handleCopySection(proposalData?.suggestedSkills, 'Suggested Skills')}
+                    placeholderText="Keywords like React, Tailwind, API, etc., will be extracted."
+                    type="chips"
+                />
+                
+                <PlaceholderCard />
+            </div>
+
+          </div>
+        </div>
+      </main>
+      <footer className="mt-12 text-center text-gray-400 text-xs">
+        <p>Powered by Gemini 2.5 Flash API</p>
+      </footer>
+    </div>
+  );
+};
+
+// --- SUB-COMPONENTS ---
+
+/**
+ * Reusable component for displaying AI-generated sections.
+ */
+const ProposalSection = ({ title, icon: Icon, color, content, isLoading, onCopy, placeholderText, type }) => {
+  // Determine if content is ready for display (non-null and not empty for arrays/strings)
+  const isContentReady = content && (type === 'list' || type === 'chips' ? content.length > 0 : content.length > 0);
+
+  return (
+    <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-200 min-h-[150px] flex flex-col">
+      <div className="flex justify-between items-start mb-3">
+        <h3 className="text-xl font-bold flex items-center">
+          <Icon className={`w-6 h-6 mr-2 ${color}`} />
+          {title}
+        </h3>
+        <button
+          onClick={onCopy}
+          disabled={!isContentReady}
+          className={`p-2 rounded-full transition duration-150 ${
+            isContentReady
+              ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-600'
+              : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+          }`}
+          title="Copy to Clipboard"
+        >
+          <Copy className="w-5 h-5" />
+        </button>
+      </div>
+
+      <div className="flex-grow">
+        {isLoading ? (
+          <div className="flex items-center justify-center h-full text-indigo-500">
+            <Loader2 className="w-6 h-6 animate-spin mr-2" />
+            <span className="font-medium">Thinking...</span>
+          </div>
+        ) : isContentReady ? (
+          type === 'list' ? (
+            <ul className="list-disc pl-5 space-y-1 text-gray-700">
+              {content.map((item, index) => (
+                <li key={index} className="text-sm">{item}</li>
+              ))}
+            </ul>
+          ) : type === 'chips' ? (
+            <div className="flex flex-wrap gap-2">
+              {content.map((item, index) => (
+                <span
+                  key={index}
+                  className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-semibold shadow-sm"
+                >
+                  {item}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-gray-700 whitespace-pre-wrap">{content}</p>
+          )
+        ) : (
+          <p className="text-gray-400 italic text-sm mt-2">{placeholderText}</p>
         )}
       </div>
     </div>
   );
 };
+
+/**
+ * Placeholder card for profile logo/link.
+ */
+const PlaceholderCard = () => (
+    <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-200 min-h-[150px] flex flex-col">
+        <h3 className="text-xl font-bold flex items-center text-gray-800 mb-3">
+            <Link className="w-6 h-6 mr-2 text-red-500" />
+            Profile Quick Link
+        </h3>
+        <div className="flex items-center space-x-4">
+            <div className="w-12 h-12 bg-red-100 text-red-500 rounded-full flex items-center justify-center font-bold text-lg border-2 border-red-300">
+                <Shield className="w-6 h-6" />
+            </div>
+            <p className="text-gray-700 text-sm">
+                Remember to manually add the Upwork job URL to your proposal and verify you included the client's required codeword!
+            </p>
+        </div>
+        <a href="https://www.upwork.com/freelancers/~0123456789" target="_blank" rel="noopener noreferrer" className="mt-4 text-sm text-indigo-600 hover:text-indigo-800 font-semibold flex items-center">
+            Go to Your Upwork Profile
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="ml-1"><path d="M7 17l9.2-9.2M17 1v10M17 7H7"/></svg>
+        </a>
+    </div>
+);
 
 export default App;
