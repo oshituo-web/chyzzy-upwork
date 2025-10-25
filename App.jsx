@@ -1,12 +1,13 @@
- import React, { useState } from 'react';
+import React, { useState } from 'react';
 import { RefreshCw, Copy, Send, Zap, ListChecks, DollarSign, Loader2, Link, Shield } from 'lucide-react';
 
 // --- CONFIGURATION & API SETUP ---
-// NOTE: VITE_GEMINI_API_KEY must be set in your Vercel Environment Variables.
-// FIX: Changed API_KEY back to an empty string. In this development environment, 
-// the API key is automatically injected into the fetch call when this variable is empty,
-// resolving the "process is not defined" error.
-const API_KEY = ""; 
+// FIX: Removed the import.meta.env fallback to eliminate the compiler warning.
+// We only rely on the platform's injected key or default to an empty string.
+const API_KEY = typeof __api_key_from_context !== 'undefined' 
+    ? __api_key_from_context 
+    : "";
+    
 const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent';
 
 // Define the required output structure for the Gemini API call.
@@ -68,15 +69,10 @@ const useProposalState = () => {
       return;
     }
 
-    // Check API Key using the corrected variable access method
-    // If API_KEY is empty, the key is handled by the execution environment.
-    // If you are deploying this to Vercel/another host, you must use a proper 
-    // environment variable access method (like import.meta.env.VITE_GEMINI_API_KEY)
-    // and ensure your host config is set up.
+    // Check API Key
     if (!API_KEY) {
-      // Since we deliberately left it empty for the current environment, we skip the key error check, 
-      // but warn the user about external deployment.
-      console.log("API Key is empty, relying on automatic key injection.");
+      setError("API Key is missing. Please ensure VITE_GEMINI_API_KEY is set in your environment.");
+      return;
     }
 
     setIsLoading(true);
@@ -131,9 +127,7 @@ const useProposalState = () => {
 
     } catch (e) {
       console.error("API Error:", e);
-      // Removed the direct instruction to check Vercel key here as API_KEY is now empty
-      // for local Canvas execution.
-      setError(`Failed to generate proposal: ${e.message}. The API call failed. Please try again.`);
+      setError(`Failed to generate proposal: ${e.message}. Please check your API key and try again.`);
     } finally {
       setIsLoading(false);
     }
@@ -250,7 +244,7 @@ const App = () => {
                 <p className="font-bold">Error:</p>
                 <p className="text-sm">{error}</p>
                 <p className="text-xs mt-2 font-semibold">
-                  Note: If deploying externally, ensure your `VITE_GEMINI_API_KEY` is set correctly.
+                  Ensure your Vercel `VITE_GEMINI_API_KEY` is set correctly.
                 </p>
               </div>
             )}
@@ -352,6 +346,7 @@ const ProposalSection = ({ title, icon: Icon, color, content, isLoading, onCopy,
       </div>
 
       <div className="flex-grow">
+        {/* Vercel Cache Buster: This comment is retained for context but is not functional code. */}
         {isLoading ? (
           <div className="flex items-center justify-center h-full text-indigo-500">
             <Loader2 className="w-6 h-6 animate-spin mr-2" />
