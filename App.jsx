@@ -1,14 +1,22 @@
 import React, { useState } from 'react';
-import { RefreshCw, Copy, Send, Zap, ListChecks, DollarSign, Loader2, Link, Shield } from 'lucide-react';
+
+// --- ICON DEFINITIONS (Replacing lucide-react with inline SVG) ---
+const IconSend = (props) => (<svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" x2="11" y1="2" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>);
+const IconZap = (props) => (<svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>);
+const IconListChecks = (props) => (<svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 11l-3 3l-2.5-2.5"/><path d="M11 4h10"/><path d="M11 8h10"/><path d="M11 12h10"/><path d="M2 4h4"/><path d="M2 8h4"/><path d="M2 12h4"/></svg>);
+const IconDollarSign = (props) => (<svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>);
+const IconCopy = (props) => (<svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="13" height="13" x="9" y="9" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>);
+const IconLoader2 = (props) => (<svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>);
+const IconLink = (props) => (<svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>);
+const IconShield = (props) => (<svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>);
 
 // --- CONFIGURATION & API SETUP ---
-// FIX: Using conditional check to correctly access the environment variable.
-// If running in a standard Vite/Vercel env, it uses import.meta.env.
-// If running in a specific platform environment (like Canvas), it uses the injected variable.
+// FIXED: Using standard Vite access method (import.meta.env.VITE_GEMINI_API_KEY) which works on Vercel.
+// Added a final fallback for safety.
 const API_KEY = 
-    (typeof __api_key_from_context !== 'undefined' && __api_key_from_context) // Check for platform injection
-    || (typeof import.meta.env !== 'undefined' && import.meta.env.VITE_GEMINI_API_KEY) // Check for Vite/Vercel env
-    || ""; // Default to empty string
+    (typeof import.meta.env !== 'undefined' && import.meta.env.VITE_GEMINI_API_KEY) // Vercel/Vite environment
+    || (typeof __api_key_from_context !== 'undefined' && __api_key_from_context) // Canvas environment
+    || ""; // Default if not found anywhere
     
 const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent';
 
@@ -73,7 +81,6 @@ const useProposalState = () => {
 
     // Check API Key
     if (!API_KEY) {
-      // Specific instruction for Vercel users seeing the missing key error
       setError("API Key is missing. Please ensure VITE_GEMINI_API_KEY is correctly set in your Vercel environment.");
       return;
     }
@@ -130,7 +137,8 @@ const useProposalState = () => {
 
     } catch (e) {
       console.error("API Error:", e);
-      setError(`Failed to generate proposal: ${e.message}. Please check your API key and try again.`);
+      // Removed specific VITE_GEMINI_API_KEY mention here as the generic message is better if another API error occurs.
+      setError(`Failed to generate proposal: ${e.message}. Please verify your API key and try again.`);
     } finally {
       setIsLoading(false);
     }
@@ -195,7 +203,7 @@ const App = () => {
       <script src="https://cdn.tailwindcss.com"></script>
       <header className="text-center mb-8">
         <h1 className="4xl sm:text-5xl font-extrabold text-indigo-700 tracking-tight flex items-center justify-center">
-          <Zap className="w-8 h-8 mr-2 text-yellow-500" />
+          <IconZap className="w-8 h-8 mr-2 text-yellow-500" />
           Upwork Proposal AI Helper
         </h1>
         <p className="text-gray-600 mt-2 text-lg">
@@ -209,7 +217,7 @@ const App = () => {
           <div className="lg:col-span-1 space-y-4">
             <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
               <h2 className="text-2xl font-semibold text-gray-800 mb-4 flex items-center">
-                <Send className="w-5 h-5 mr-2 text-indigo-500" />
+                <IconSend className="w-5 h-5 mr-2 text-indigo-500" />
                 Paste Job Description
               </h2>
               <textarea
@@ -230,12 +238,12 @@ const App = () => {
               >
                 {isLoading ? (
                   <>
-                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    <IconLoader2 className="w-5 h-5 mr-2 animate-spin" />
                     Generating...
                   </>
                 ) : (
                   <>
-                    <Zap className="w-5 h-5 mr-2" />
+                    <IconZap className="w-5 h-5 mr-2" />
                     Generate Proposal
                   </>
                 )}
@@ -263,7 +271,7 @@ const App = () => {
 
             <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
                 <h3 className="text-xl font-semibold text-gray-800 mb-3 flex items-center">
-                    <DollarSign className="w-5 h-5 mr-2 text-green-500" />
+                    <IconDollarSign className="w-5 h-5 mr-2 text-green-500" />
                     Pricing & Budget Note
                 </h3>
                 <p className="text-sm text-gray-600">
@@ -276,7 +284,7 @@ const App = () => {
           <div className="lg:col-span-2 space-y-6">
             <ProposalSection
               title="Client Needs Summary"
-              icon={ListChecks}
+              icon={IconListChecks}
               color="text-indigo-500"
               content={proposalData?.clientSummary || []}
               isLoading={isLoading}
@@ -287,7 +295,7 @@ const App = () => {
 
             <ProposalSection
               title="Proposal Draft (Ready to Send)"
-              icon={Send}
+              icon={IconSend}
               color="text-blue-500"
               content={proposalData?.proposalDraft || ''}
               isLoading={isLoading}
@@ -299,7 +307,7 @@ const App = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <ProposalSection
                     title="Suggested Skills/Keywords"
-                    icon={Zap}
+                    icon={IconZap}
                     color="text-yellow-500"
                     content={proposalData?.suggestedSkills || []}
                     isLoading={isLoading}
@@ -347,15 +355,14 @@ const ProposalSection = ({ title, icon: Icon, color, content, isLoading, onCopy,
           }`}
           title="Copy to Clipboard"
         >
-          <Copy className="w-5 h-5" />
+          <IconCopy className="w-5 h-5" />
         </button>
       </div>
 
       <div className="flex-grow">
-        {/* Vercel Cache Buster: This comment is retained for context but is not functional code. */}
         {isLoading ? (
           <div className="flex items-center justify-center h-full text-indigo-500">
-            <Loader2 className="w-6 h-6 animate-spin mr-2" />
+            <IconLoader2 className="w-6 h-6 animate-spin mr-2" />
             <span className="font-medium">Thinking...</span>
           </div>
         ) : isContentReady ? (
@@ -393,12 +400,12 @@ const ProposalSection = ({ title, icon: Icon, color, content, isLoading, onCopy,
 const PlaceholderCard = () => (
     <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-200 min-h-[150px] flex flex-col">
         <h3 className="text-xl font-bold flex items-center text-gray-800 mb-3">
-            <Link className="w-6 h-6 mr-2 text-red-500" />
+            <IconLink className="w-6 h-6 mr-2 text-red-500" />
             Profile Quick Link
         </h3>
         <div className="flex items-center space-x-4">
             <div className="w-12 h-12 bg-red-100 text-red-500 rounded-full flex items-center justify-center font-bold text-lg border-2 border-red-300">
-                <Shield className="w-6 h-6" />
+                <IconShield className="w-6 h-6" />
             </div>
             <p className="text-gray-700 text-sm">
                 Remember to manually add the Upwork job URL to your proposal and verify you included the client's required codeword!
