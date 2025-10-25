@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import { RefreshCw, Copy, Send, Zap, ListChecks, DollarSign, Loader2, Link, Shield } from 'lucide-react';
 
 // --- CONFIGURATION & API SETUP ---
-// FIX: Removed the import.meta.env fallback to eliminate the compiler warning.
-// We only rely on the platform's injected key or default to an empty string.
-const API_KEY = typeof __api_key_from_context !== 'undefined' 
-    ? __api_key_from_context 
-    : "";
+// FIX: Using conditional check to correctly access the environment variable.
+// If running in a standard Vite/Vercel env, it uses import.meta.env.
+// If running in a specific platform environment (like Canvas), it uses the injected variable.
+const API_KEY = 
+    (typeof __api_key_from_context !== 'undefined' && __api_key_from_context) // Check for platform injection
+    || (typeof import.meta.env !== 'undefined' && import.meta.env.VITE_GEMINI_API_KEY) // Check for Vite/Vercel env
+    || ""; // Default to empty string
     
 const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent';
 
@@ -71,7 +73,8 @@ const useProposalState = () => {
 
     // Check API Key
     if (!API_KEY) {
-      setError("API Key is missing. Please ensure VITE_GEMINI_API_KEY is set in your environment.");
+      // Specific instruction for Vercel users seeing the missing key error
+      setError("API Key is missing. Please ensure VITE_GEMINI_API_KEY is correctly set in your Vercel environment.");
       return;
     }
 
@@ -243,9 +246,12 @@ const App = () => {
               <div className="p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg shadow-md">
                 <p className="font-bold">Error:</p>
                 <p className="text-sm">{error}</p>
-                <p className="text-xs mt-2 font-semibold">
-                  Ensure your Vercel `VITE_GEMINI_API_KEY` is set correctly.
-                </p>
+                {/* Specific instruction for Vercel users seeing the missing key error */}
+                {error.includes("VITE_GEMINI_API_KEY") && (
+                    <p className="text-xs mt-2 font-semibold">
+                        **Action Required:** Please ensure you have set the **VITE_GEMINI_API_KEY** environment variable in your Vercel project settings, then **Redeploy**.
+                    </p>
+                )}
               </div>
             )}
             
